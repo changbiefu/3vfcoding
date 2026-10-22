@@ -53,6 +53,79 @@ const canEdit=()=>role==='admin', canTeach=()=>role==='admin'||role==='teacher';
 const roleName={admin:'校区管理员',teacher:'教师视角',parent:'家长视角',student:'学生视角'};
 const navs=[['dashboard','home','成长工作台'],['students','users','学员管理'],['classes','book','课程与班级'],['schedule','calendar','本周课表'],['trials','spark','试听跟进'],['enrollments','wallet','报名缴费'],['growth','leaf','成长记录'],['settings','settings','演示设置']];
 const allowed=()=>family()?['dashboard','schedule','growth','settings']:role==='teacher'?['dashboard','students','classes','schedule','growth','settings']:navs.map(x=>x[0]);
+// Workspace tabs and recent page history are separate from the demo's business data.
+const WORKSPACE_KEY=KEY+':workspace';
+let workspaces={};
+try { const saved=JSON.parse(sessionStorage.getItem(WORKSPACE_KEY)||'{}'); if(saved&&typeof saved==='object'&&!Array.isArray(saved))workspaces=saved; } catch {}
+function workspace(){
+ const valid=allowed();
+ let w=workspaces[role];
+ if(!w||typeof w!=='object'||Array.isArray(w))w=workspaces[role]={};
+ w.tabs=['dashboard',...new Set((Array.isArray(w.tabs)?w.tabs:[]).filter(r=>r!=='dashboard'&&valid.includes(r)))];
+ w.trail=(Array.isArray(w.trail)?w.trail:[]).filter(r=>valid.includes(r)).filter((r,i,a)=>i===0||r!==a[i-1]).slice(-80);
+ if(!w.scrolls||typeof w.scrolls!=='object')w.scrolls={};
+ if(!w.views||typeof w.views!=='object')w.views={};
+ if(!valid.includes(w.current))w.current='dashboard';
+ return w;
+}
+function rememberWorkspace(){
+ const w=workspace();
+ if(!w.tabs.includes(route))w.tabs.push(route);
+ if(w.trail.at(-1)!==route)w.trail.push(route);
+ w.trail=w.trail.slice(-80);
+ w.current=route;
+ w.views={studentSearch,studentClass,studentStatus,trialStatus,selectedDay,weekOffset};
+ try { sessionStorage.setItem(WORKSPACE_KEY,JSON.stringify(workspaces)); } catch {}
+}
+function restoreWorkspace(){
+ const v=workspace().views;
+ studentSearch=typeof v.studentSearch==='string'?v.studentSearch.slice(0,200):'';
+ studentClass=state.classes.some(c=>c.id===v.studentClass)?v.studentClass:'';
+ studentStatus=['在读','暂停','low'].includes(v.studentStatus)?v.studentStatus:'';
+ trialStatus=['待联系','待试听','已试听','已报名'].includes(v.trialStatus)?v.trialStatus:'';
+ selectedDay=/^\d{4}-\d{2}-\d{2}$/.test(v.selectedDay)?v.selectedDay:today();
+ weekOffset=Number.isInteger(v.weekOffset)&&Math.abs(v.weekOffset)<5200?v.weekOffset:0;
+}
+function workspaceTitle(r){return r==='dashboard'&&family()?(role==='parent'?'孩子的成长':'我的成长'):navs.find(n=>n[0]===r)?.[2]||'成长工作台'}
+function workspaceBar(){
+ const w=workspace(),previous=w.trail.length>1?w.trail.at(-2):null;
+ return `<div class="workspace-bar" aria-label="页面工作区"><button class="workspace-back" data-action="page-back" ${previous?'':'disabled'} aria-label="返回上一个页面" title="${previous?'返回：'+esc(workspaceTitle(previous)):'已在起始页面'}"><span class="back-arrow">${icon('arrow')}</span><span>返回</span></button><div class="workspace-tabs" role="tablist" aria-label="已打开的页面">${w.tabs.map(r=>`<div class="workspace-tab ${r===route?'active':''}" role="presentation"><button type="button" role="tab" id="workspace-tab-${r}" aria-controls="content" aria-selected="${r===route}" tabindex="${r===route?'0':'-1'}" data-action="tab-open" data-id="${r}">${icon(navs.find(n=>n[0]===r)[1])}<span>${workspaceTitle(r)}</span></button>${r==='dashboard'?'':`<button type="button" class="tab-close" data-action="tab-close" data-id="${r}" aria-label="关闭${workspaceTitle(r)}标签">${icon('close')}</button>`}</div>`).join('')}</div><button class="workspace-close-others" data-action="tabs-close-others" aria-label="关闭其他标签" title="保留首页与当前页面" ${w.tabs.every(r=>r==='dashboard'||r===route)?'disabled':''}>${icon('close')}<span>关闭其他</span></button></div>`;
+}
+function backPage(){
+ const w=workspace();
+ if(w.trail.length<2)return;
+ w.trail.pop();
+ go(w.trail.at(-1),{replace:true});
+}
+function closeTab(r){
+ const w=workspace();
+ if(r==='dashboard'||!w.tabs.includes(r))return;
+ w.tabs=w.tabs.filter(t=>t!==r);
+ w.trail=w.trail.filter(t=>t!==r);
+ delete w.scrolls[r];
+ if(r===route)go(w.trail.at(-1)||w.tabs.at(-1)||'dashboard',{replace:true});
+ else render();
+}
+function closeOtherTabs(){
+ const w=workspace();
+ w.tabs=w.tabs.filter(r=>r==='dashboard'||r===route);
+ w.trail=w.trail.filter(r=>w.tabs.includes(r));
+ render();
+}
+function revealActiveTab(){
+ const strip=$('.workspace-tabs'),tab=$('.workspace-tab.active');
+ if(!strip||!tab)return;
+ const outer=strip.getBoundingClientRect(),inner=tab.getBoundingClientRect();
+ if(inner.left<outer.left)strip.scrollLeft-=outer.left-inner.left;
+ if(inner.right>outer.right)strip.scrollLeft+=inner.right-outer.right;
+}
+restoreWorkspace();
+if(!location.hash)route=workspace().current;
+if(!allowed().includes(route))route='dashboard';
+if(location.hash!=='#'+route)history.replaceState(null,'','#'+route);
+// A directly opened inner page can always return to the workbench.
+if(!workspace().trail.length&&route!=='dashboard')workspace().trail.push('dashboard');
+
 function commit(next,message){try{validateState(next);localStorage.setItem(KEY,JSON.stringify(next));state=next;render();if(message)toast(message);return true}catch(e){toast('保存失败：'+(e.name==='QuotaExceededError'?'浏览器缓存空间不足，请先导出备份':e.message));return false}}
 const copyState=()=>JSON.parse(JSON.stringify(state));
 function toast(msg){clearTimeout(toastTimer);$('#toast').textContent=msg;$('#toast').classList.add('show');toastTimer=setTimeout(()=>$('#toast').classList.remove('show'),3500)}
@@ -63,12 +136,14 @@ const linkBtn=(text,action,id='')=>`<button class="text-btn" data-action="${acti
 function empty(title='还没有相关记录',text='新的成长故事，正等着被记录。'){return `<div class="empty">${icon('leaf')}<h3>${title}</h3><p>${text}</p></div>`}
 function stat(label,value,unit,ic,foot){return `<div class="stat"><div class="stat-top">${label}${icon(ic,'stat-icon')}</div><div class="stat-value">${value}<small>${unit}</small></div><div class="stat-foot">${foot}</div></div>`}
 function heading(eyebrow,title,sub,action=''){return `<div class="page-title"><div><div class="eyebrow">${eyebrow}</div><h1>${title}</h1><p>${sub}</p></div>${action||`<div class="date-chip">${icon('calendar')}${longDate(today())}</div>`}</div>`}
-function titleFor(){if(family()&&route==='dashboard')return role==='parent'?'孩子的成长':'我的成长';return navs.find(x=>x[0]===route)?.[2]||'成长工作台'}
+function titleFor(){return workspaceTitle(route)}
 function render(){
  if(!loggedIn){renderLogin();return}
  if(!allowed().includes(route))route='dashboard';
+ rememberWorkspace();
  document.title='国际人成长中心 · '+titleFor();
- $('#app').innerHTML=`<button class="mobile-overlay" aria-label="关闭导航" data-action="menu"></button><aside class="sidebar"><a class="brand" href="#dashboard"><img src="${BRAND.mascot}" alt="国际人云小猴 Logo"><div class="brand-name">国际人成长中心<small>GROW WITH CURIOSITY</small></div></a><div class="nav-label">陪伴 · 每一步成长</div><nav class="nav" aria-label="主导航">${navs.filter(n=>allowed().includes(n[0])&&n[0]!=='settings').map(n=>`<a href="#${n[0]}" class="${route===n[0]?'active':''}" ${route===n[0]?'aria-current="page"':''}>${icon(n[1])}<span>${family()&&n[0]==='dashboard'?(role==='parent'?'孩子的成长':'我的成长'):n[2]}</span>${n[0]==='trials'?`<span class="count">${state.trials.filter(t=>['待试听','待联系'].includes(t.status)).length}</span>`:''}</a>`).join('')}</nav><div class="nav-label">更多</div><nav class="nav"><a href="#settings" class="${route==='settings'?'active':''}">${icon('settings')}演示设置</a></nav><div class="sidebar-bottom"><div class="sidebar-note"><strong>每一份好奇，都值得被看见。</strong><br>在陪伴中探索，在探索中成长。</div><div class="sidebar-footer">GUO JI REN · GROWTH CENTER</div></div></aside><main class="main"><header class="topbar"><button class="circle-btn mobile-menu" data-action="menu" aria-label="打开导航">${icon('menu')}</button><div class="breadcrumb"><span>成长中心</span>${icon('chevron')}<strong>${titleFor()}</strong></div><div class="top-actions">${!family()?`<form class="searchbox" id="global-search">${icon('search')}<input name="q" placeholder="搜索学员姓名…" aria-label="搜索学员姓名"><kbd>↵</kbd></form>`:''}<button class="circle-btn" data-action="fullscreen" aria-label="切换全屏">${icon('full')}</button><select class="role-select" id="role-select" aria-label="切换演示身份">${Object.entries(roleName).map(([v,n])=>`<option value="${v}" ${role===v?'selected':''}>${n}</option>`).join('')}</select><button class="profile" data-action="account" aria-label="演示账号信息">${avatar(role==='admin'?'校长':role==='teacher'?'老师':role==='parent'?'家长':'学员')}<span>${role==='admin'?'管理员':role==='teacher'?'李老师':role==='parent'?'林小满家长':'林小满'}<small>演示账号</small></span></button></div></header><div class="content" id="content">${({dashboard:dashboard,students:studentsPage,classes:classesPage,schedule:schedulePage,trials:trialsPage,enrollments:enrollmentsPage,growth:growthPage,settings:settingsPage}[route])()}<footer class="footer"><span>国际人成长中心 · 让每一份好奇，都长成自己的光</span><span><i class="dot"></i>演示模式 · 数据保存在当前浏览器</span></footer></div></main>`;
+ $('#app').innerHTML=`<button class="mobile-overlay" aria-label="关闭导航" data-action="menu"></button><aside class="sidebar"><a class="brand" href="#dashboard"><img src="${BRAND.mascot}" alt="国际人云小猴 Logo"><div class="brand-name">国际人成长中心<small>GROW WITH CURIOSITY</small></div></a><div class="nav-label">陪伴 · 每一步成长</div><nav class="nav" aria-label="主导航">${navs.filter(n=>allowed().includes(n[0])&&n[0]!=='settings').map(n=>`<a href="#${n[0]}" class="${route===n[0]?'active':''}" ${route===n[0]?'aria-current="page"':''}>${icon(n[1])}<span>${family()&&n[0]==='dashboard'?(role==='parent'?'孩子的成长':'我的成长'):n[2]}</span>${n[0]==='trials'?`<span class="count">${state.trials.filter(t=>['待试听','待联系'].includes(t.status)).length}</span>`:''}</a>`).join('')}</nav><div class="nav-label">更多</div><nav class="nav"><a href="#settings" class="${route==='settings'?'active':''}">${icon('settings')}演示设置</a></nav><div class="sidebar-bottom"><div class="sidebar-note"><strong>每一份好奇，都值得被看见。</strong><br>在陪伴中探索，在探索中成长。</div><div class="sidebar-footer">GUO JI REN · GROWTH CENTER</div></div></aside><main class="main"><header class="topbar"><button class="circle-btn mobile-menu" data-action="menu" aria-label="打开导航">${icon('menu')}</button><div class="breadcrumb"><a href="#dashboard" aria-label="返回成长工作台">成长中心</a>${icon('chevron')}<strong>${titleFor()}</strong></div><div class="top-actions">${!family()?`<form class="searchbox" id="global-search">${icon('search')}<input name="q" placeholder="搜索学员姓名…" aria-label="搜索学员姓名"><kbd>↵</kbd></form>`:''}<button class="circle-btn" data-action="fullscreen" aria-label="切换全屏">${icon('full')}</button><select class="role-select" id="role-select" aria-label="切换演示身份">${Object.entries(roleName).map(([v,n])=>`<option value="${v}" ${role===v?'selected':''}>${n}</option>`).join('')}</select><button class="profile" data-action="account" aria-label="演示账号信息">${avatar(role==='admin'?'校长':role==='teacher'?'老师':role==='parent'?'家长':'学员')}<span>${role==='admin'?'管理员':role==='teacher'?'李老师':role==='parent'?'林小满家长':'林小满'}<small>演示账号</small></span></button></div></header>${workspaceBar()}<div class="content" id="content" role="tabpanel" aria-labelledby="workspace-tab-${route}">${({dashboard:dashboard,students:studentsPage,classes:classesPage,schedule:schedulePage,trials:trialsPage,enrollments:enrollmentsPage,growth:growthPage,settings:settingsPage}[route])()}<footer class="footer"><span>国际人成长中心 · 让每一份好奇，都长成自己的光</span><span><i class="dot"></i>演示模式 · 数据保存在当前浏览器</span></footer></div></main>`;
+ revealActiveTab();
 }
 function dashboard(){if(family())return childDashboard();const low=activeStudents().filter(s=>s.remaining<=4), upcoming=state.lessons.filter(l=>l.date===today()).sort((a,b)=>a.time.localeCompare(b.time));
  return heading('A LITTLE PROGRESS, EVERY DAY','成长工作台','你好，'+(role==='teacher'?'李老师':'管理员')+'。今天也一起，发现成长的闪光时刻。')+
@@ -119,10 +194,31 @@ function saveForm(form){let type=form.dataset.type,id=form.dataset.id,d=Object.f
  }catch(e){$('#form-error').textContent=e.message}}
 function saveAttendance(form){if(!canTeach())return;let next=copyState(),l=next.lessons.find(x=>x.id===form.dataset.id);if(l.checked){closeModal();toast('这节课已经签到过了');return}let selected=new Set(new FormData(form).getAll('present'));const members=next.students.filter(s=>!s.archived&&s.classId===l.classId&&s.status==='在读');for(const s of members){const present=selected.has(s.id);if(present&&s.remaining<1){toast(s.name+'的课时不足');return}if(present)s.remaining-=1;next.checkins.push({lessonId:l.id,studentId:s.id,present,date:today()})}l.checked=true;if(commit(next,'签到完成，到课学员已扣减 1 课时'))closeModal()}
 function accountModal(){openModal('换一个视角，看见更多成长','演示账号：demo / demo123；家长、学生视角关联林小满。',`<div class="modal-content"><div class="choice-group">${Object.entries(roleName).map(([v,n])=>btn(n,'role','users',role===v?'active':'',v)).join('')}</div><div class="hint" style="margin-top:20px;margin-bottom:0">身份切换仅用于展示页面，没有真实的账号权限或数据隔离。</div></div>`,btn('退出到演示登录页','logout','logout'))}
-function setRole(v){if(!roleName[v])return;role=v;try{sessionStorage.setItem(KEY+':role',v)}catch{}route='dashboard';location.hash=route;closeModal();render();toast('已切换为'+roleName[v])}
+function setRole(v){
+ if(!roleName[v])return;
+ workspace().scrolls[route]=window.scrollY;
+ rememberWorkspace();
+ role=v;
+ try{sessionStorage.setItem(KEY+':role',v)}catch{}
+ restoreWorkspace();
+ route=workspace().current;
+ closeModal();
+ go(route,{replace:true});
+ toast('已切换为'+roleName[v]);
+}
 function renderLogin(){$('#app').innerHTML=`<main class="login"><section class="login-card"><div class="login-logo"><img src="${BRAND.mascot}" alt="国际人云小猴"><h1>国际人成长中心</h1><p>让每一份好奇，都长成自己的光。</p></div><form id="login-form"><div class="form-grid">${field('username','演示账号','demo','text',{required:true,full:true})}${field('password','演示密码','demo123','password',{required:true,full:true})}</div><button class="btn primary" type="submit">进入成长工作台 ${icon('arrow')}</button><p class="small muted" style="text-align:center;margin-top:18px">演示账号已填好 · 无需验证码</p></form></section></main>`}
-function go(r){route=r;location.hash=r;document.body.classList.remove('mobile-open');render();window.scrollTo(0,0)}
+function go(r,{replace=false,fromBrowser=false}={}){
+ if(!allowed().includes(r))r='dashboard';
+ const w=workspace();
+ w.scrolls[route]=window.scrollY;
+ route=r;
+ if(location.hash!=='#'+r&&!fromBrowser)history[replace?'replaceState':'pushState'](null,'','#'+r);
+ document.body.classList.remove('mobile-open');
+ render();
+ window.scrollTo(0,Number.isFinite(w.scrolls[r])?w.scrolls[r]:0);
+}
 const actions={
+ 'page-back':backPage,'tab-open':go,'tab-close':closeTab,'tabs-close-others':closeOtherTabs,
  'menu':()=>document.body.classList.toggle('mobile-open'),'modal-close':closeModal,'account':accountModal,'role':setRole,'logout':()=>{closeModal();loggedIn=false;renderLogin()},
  'fullscreen':async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen()}catch{toast('当前浏览器不支持全屏，可在独立浏览器窗口打开')}},
  'student-new':()=>canEdit()&&studentForm(),'student-edit':id=>canEdit()&&studentForm(id),'student-view':studentView,'class-new':()=>canEdit()&&classForm(),'class-edit':id=>canEdit()&&classForm(id),
@@ -140,11 +236,24 @@ const actions={
  'import-confirm':()=>{if(!canEdit()||!pendingImport)return;try{localStorage.setItem(BACKUP,JSON.stringify(state));if(commit(pendingImport,'备份已导入，原数据快照已保留')){pendingImport=null;closeModal()}}catch{toast('备份保存失败，未替换数据')}}
 };
 let pendingImport=null;
-document.addEventListener('click',e=>{const b=e.target.closest('[data-action]');if(b){const a=b.dataset.action;if(actions[a])actions[a](b.dataset.id||'');else if(allowed().includes(a))go(a)}const a=e.target.closest('a[href^="#"]');if(a)document.body.classList.remove('mobile-open')});
+document.addEventListener('click',e=>{const b=e.target.closest('[data-action]');if(b){const a=b.dataset.action;if(actions[a])actions[a](b.dataset.id||'');else if(allowed().includes(a))go(a)}const a=e.target.closest('a[href^="#"]');if(a&&!e.ctrlKey&&!e.metaKey&&!e.shiftKey&&!e.altKey&&e.button===0){e.preventDefault();go(a.getAttribute('href').slice(1))}});
 document.addEventListener('submit',e=>{e.preventDefault();if(e.target.id==='record-form')saveForm(e.target);if(e.target.id==='attendance-form')saveAttendance(e.target);if(e.target.id==='global-search'){studentSearch=new FormData(e.target).get('q').trim();studentClass='';studentStatus='';go('students')}if(e.target.id==='login-form'){const d=new FormData(e.target);if(d.get('username')==='demo'&&d.get('password')==='demo123'){loggedIn=true;role='admin';go('dashboard');toast('欢迎回到成长中心')}else toast('演示账号为 demo，密码为 demo123')}});
-document.addEventListener('input',e=>{if(e.target.id==='student-search'){studentSearch=e.target.value;$('#student-table').innerHTML=studentTable()}});
-document.addEventListener('change',e=>{if(e.target.id==='role-select')setRole(e.target.value);if(e.target.id==='student-class'){studentClass=e.target.value;$('#student-table').innerHTML=studentTable()}if(e.target.id==='student-status'){studentStatus=e.target.value;$('#student-table').innerHTML=studentTable()}});
+document.addEventListener('input',e=>{if(e.target.id==='student-search'){studentSearch=e.target.value;$('#student-table').innerHTML=studentTable();rememberWorkspace()}});
+document.addEventListener('change',e=>{if(e.target.id==='role-select')setRole(e.target.value);if(e.target.id==='student-class'){studentClass=e.target.value;$('#student-table').innerHTML=studentTable();rememberWorkspace()}if(e.target.id==='student-status'){studentStatus=e.target.value;$('#student-table').innerHTML=studentTable();rememberWorkspace()}});
 $('#import-file').addEventListener('change',async e=>{const file=e.target.files[0];e.target.value='';if(!file)return;if(file.size>5*1024*1024)return toast('请选择小于 5 MB 的演示备份');try{pendingImport=validateState(JSON.parse(await file.text()));openModal('导入这份备份？',`${pendingImport.students.length} 位学员 · ${pendingImport.classes.length} 个班级`, '<div class="modal-content"><p class="small muted">将替换当前浏览器中的演示数据。导入前会保存当前数据快照，可在演示设置中恢复。</p></div>',btn('取消','modal-close')+btn('确认导入','import-confirm','upload','primary'))}catch(e){pendingImport=null;toast('导入失败：'+e.message)}});
-window.addEventListener('hashchange',()=>{route=location.hash.slice(1)||'dashboard';render();window.scrollTo(0,0)});
+window.addEventListener('hashchange',()=>go(location.hash.slice(1)||'dashboard',{fromBrowser:true}));
 window.addEventListener('storage',e=>{if(e.key===KEY&&e.newValue){try{state=validateState(JSON.parse(e.newValue));closeModal();render();toast('已同步另一个标签页的修改')}catch{toast('其他标签页的数据无法读取')}}});
+window.addEventListener('pagehide',()=>{workspace().scrolls[route]=window.scrollY;rememberWorkspace()});
+document.addEventListener('keydown',e=>{
+ const active=e.target.closest('[role="tab"]');
+ if(!active)return;
+ const tabs=workspace().tabs,index=tabs.indexOf(active.dataset.id);
+ let next;
+ if(e.key==='ArrowRight')next=tabs[(index+1)%tabs.length];
+ if(e.key==='ArrowLeft')next=tabs[(index-1+tabs.length)%tabs.length];
+ if(e.key==='Home')next=tabs[0];
+ if(e.key==='End')next=tabs.at(-1);
+ if(next){e.preventDefault();go(next);document.getElementById('workspace-tab-'+next)?.focus()}
+ if(e.key==='Delete'&&active.dataset.id!=='dashboard'){e.preventDefault();closeTab(active.dataset.id);document.getElementById('workspace-tab-'+route)?.focus()}
+});
 render();if(storageWarning)toast(storageWarning);

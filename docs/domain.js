@@ -9,6 +9,12 @@ const Domain = (() => {
  const arrays=['courses','points','changes','adjustments','settlements','feeWarnings','warnings','resources','aids','contacts','staff','groups','members','memberGroups','memberLevels','attachments','attachGroups','blacklist','languages','configGroups','configItems','logs'];
  const date = () => {const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`};
  function upgrade(s){
+  // Normalize only the original preset labels; preserve all user-entered content.
+  for(const x of s.groups||[])if(x.id==='group-admin'&&x.description==='管理所有演示业务')x.description='管理校区业务';
+  for(const x of s.points||[])if(x.id.startsWith('point-seed-')&&x.reason==='示例：课堂积极参与')x.reason='课堂积极参与';
+  for(const x of s.contacts||[])if(x.id==='contact-demo'&&x.remark==='虚构演示联系人')x.remark='教学咨询与课程服务';
+  for(const x of s.enrollments||[])if(x.method==='演示收款')x.method='收款登记';
+  for(const x of s.logs||[])if(x.operator==='演示账号')x.operator='管理员';
   if(s.extensionVersion===2)return s;
   const day=date();
   for(const k of arrays)if(!Array.isArray(s[k]))s[k]=[];
@@ -19,9 +25,9 @@ const Domain = (() => {
   for(const c of s.checkins){c.id??=id('check');c.deduct??=c.present?1:0;c.status??=c.present?'到课':'请假';c.remaining??=s.students.find(x=>x.id===c.studentId)?.remaining||0}
   for(const e of s.enrollments){e.gift??=0;e.payStatus??='已付款';e.status??='已完成';e.type??='续费报名';e.paid??=e.amount;e.applied??=true;e.legacy??=true}
   if(!s.staff.length)s.staff=[...new Set(s.classes.map(c=>c.teacher))].map((name,i)=>({id:'staff-'+i,name,username:'teacher'+(i+1),phone:'',email:'',role:'教师',status:'正常',price:100}));
-  if(!s.groups.length)s.groups=[{id:'group-admin',name:'校区管理',description:'管理所有演示业务',routes:'全部',status:'正常'},{id:'group-teacher',name:'授课教师',description:'仅展示本人班级及教学工作',routes:'教学业务',status:'正常'}];
-  if(!s.points.length)s.points=s.students.map((x,i)=>({id:'point-seed-'+i,studentId:x.id,amount:30+i*5,type:'收入',reason:'示例：课堂积极参与',date:day}));
-  if(!s.contacts.length)s.contacts=[{id:'contact-demo',name:'教学服务台',campus:'中心校区',position:'教务服务',phone:'',email:'',remark:'虚构演示联系人',status:'正常'}];
+  if(!s.groups.length)s.groups=[{id:'group-admin',name:'校区管理',description:'管理校区业务',routes:'全部',status:'正常'},{id:'group-teacher',name:'授课教师',description:'仅展示本人班级及教学工作',routes:'教学业务',status:'正常'}];
+  if(!s.points.length)s.points=s.students.map((x,i)=>({id:'point-seed-'+i,studentId:x.id,amount:30+i*5,type:'收入',reason:'课堂积极参与',date:day}));
+  if(!s.contacts.length)s.contacts=[{id:'contact-demo',name:'教学服务台',campus:'中心校区',position:'教务服务',phone:'',email:'',remark:'教学咨询与课程服务',status:'正常'}];
   if(!s.resources.length)s.resources=[{id:'resource-demo',name:'数学课堂观察记录模板',category:'教案模板',courseId:s.courses[0]?.id||'',teacher:s.staff[0]?.name||'',description:'记录本节目标、学员表现、课后跟进。',content:'课堂观察记录\n本节目标：\n重点问题：\n学生表现：\n课后跟进：\n',filename:'课堂观察记录.txt',downloads:0,date:day,status:'正常'}];
   if(!s.aids.length)s.aids=[{id:'aid-demo',name:'几何拼搭教具',quantity:2,teacher:s.staff[0]?.name||'',date:day,reason:'小组合作探究图形关系',status:'待审批',approval:''}];
   s.config??={campus:'中心校区',lowHours:4,absenceDays:30,hourPrice:100};
@@ -97,6 +103,6 @@ const Domain = (() => {
   if(k==='staff'&&(s.classes.some(c=>c.teacher===x.name)||s.lessons.some(l=>l.teacher===x.name)||s.settlements.some(l=>l.teacher===x.name)))fail('教师已有业务记录，建议停用');
   s[k]=s[k].filter(y=>y.id!==recordId);validate(s);
  }
- function audit(s,text){s.logs.push({id:id('log'),date:new Date().toLocaleString('zh-CN'),name:text,operator:'演示账号',status:'成功'});s.logs=s.logs.slice(-500)}
+ function audit(s,text){s.logs.push({id:id('log'),date:new Date().toLocaleString('zh-CN'),name:text,operator:'管理员',status:'成功'});s.logs=s.logs.slice(-500)}
  return {upgrade,validate,number,round,find,id,balance,hours,put,transfer,enrollment,attendance,undoAttendance,members,conflict,lesson,change,adjustment,executeAdjustment,teacherHours,settlement,remove,audit};
 })();
